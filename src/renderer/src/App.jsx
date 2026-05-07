@@ -51,8 +51,10 @@ async function fetchAllPages(firstUrl, token) {
   let items = [], url = firstUrl;
   while (url) {
     const d = await spotifyFetch(url, token);
-    items = [...items, ...d.items];
-    url = d.next;
+    if (d && d.items) {
+      items = [...items, ...d.items];
+    }
+    url = d ? d.next : null;
   }
   return items;
 }
@@ -209,19 +211,21 @@ function TracksScreen({ token, playlist, onBack }) {
         // Spotify /items endpoint'i 'track' yerine 'item' döndürebilir — normalize et
         const normalized = items.map(i => ({
           ...i,
-          track: i.track || i.item
+          track: i ? (i.track || i.item) : null
         }));
-        const valid = normalized.filter(i => i.track && !i.track.is_local);
+        const valid = normalized.filter(i => i && i.track && i.track.id && !i.track.is_local);
         console.log('Geçerli şarkı sayısı:', valid.length);
         setStatus(`${valid.length} şarkı yüklendi. Tür bilgileri alınıyor...`);
 
         // Tür bilgilerini çekmeyi dene — başarısız olursa şarkıları yine de göster
         const genreMap = {};
         try {
-          const artistIds = [...new Set(valid.flatMap(i => i.track.artists.map(a => a.id)).filter(Boolean))];
+          const artistIds = [...new Set(valid.flatMap(i => i.track && i.track.artists ? i.track.artists.map(a => a.id) : []).filter(Boolean))];
           for (let i = 0; i < artistIds.length; i += 50) {
             const d = await spotifyFetch(`https://api.spotify.com/v1/artists?ids=${artistIds.slice(i, i + 50).join(',')}`, token);
-            d.artists.forEach(a => { if (a) genreMap[a.id] = a.genres; });
+            if (d && d.artists) {
+              d.artists.forEach(a => { if (a) genreMap[a.id] = a.genres; });
+            }
           }
         } catch (genreErr) {
           console.warn('Tür bilgileri alınamadı (sorun değil, devam ediliyor):', genreErr.message);
@@ -229,7 +233,7 @@ function TracksScreen({ token, playlist, onBack }) {
 
         const enriched = valid.map(item => ({
           ...item,
-          genres: item.track.artists.flatMap(a => genreMap[a.id] || [])
+          genres: item.track && item.track.artists ? item.track.artists.flatMap(a => genreMap[a.id] || []) : []
         }));
         setTracks(enriched);
         setStatus('');
@@ -245,15 +249,17 @@ function TracksScreen({ token, playlist, onBack }) {
     if (!tracks.length) return;
     const sorted = [...tracks].sort((a, b) => {
       let va, vb;
+      const tA = a.track || {};
+      const tB = b.track || {};
       switch (sortBy) {
-        case 'track': va = a.track.name; vb = b.track.name; break;
-        case 'artist': va = a.track.artists[0]?.name || ''; vb = b.track.artists[0]?.name || ''; break;
-        case 'album': va = a.track.album.name; vb = b.track.album.name; break;
-        case 'duration': va = a.track.duration_ms; vb = b.track.duration_ms; break;
-        case 'release': va = a.track.album.release_date; vb = b.track.album.release_date; break;
-        case 'popularity': va = a.track.popularity; vb = b.track.popularity; break;
-        case 'genre': va = a.genres[0] || 'zzz'; vb = b.genres[0] || 'zzz'; break;
-        case 'added': va = a.added_at; vb = b.added_at; break;
+        case 'track': va = tA.name; vb = tB.name; break;
+        case 'artist': va = tA.artists?.[0]?.name || ''; vb = tB.artists?.[0]?.name || ''; break;
+        case 'album': va = tA.album?.name || ''; vb = tB.album?.name || ''; break;
+        case 'duration': va = tA.duration_ms || 0; vb = tB.duration_ms || 0; break;
+        case 'release': va = tA.album?.release_date || ''; vb = tB.album?.release_date || ''; break;
+        case 'popularity': va = tA.popularity || 0; vb = tB.popularity || 0; break;
+        case 'genre': va = a.genres?.[0] || 'zzz'; vb = b.genres?.[0] || 'zzz'; break;
+        case 'added': va = a.added_at || ''; vb = b.added_at || ''; break;
         default: return 0;
       }
       if (typeof va === 'number') return sortDir === 'asc' ? va - vb : vb - va;
@@ -360,30 +366,30 @@ function TracksScreen({ token, playlist, onBack }) {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', padding: '8px' }}>
                 {sortedTracks.map((item, i) => {
-                  const t = item.track;
-                  const pop = t.popularity;
-                  const genre = item.genres[0];
+                  const t = item.track || {};
+                  const pop = t.popularity || 0;
+                  const genre = item.genres?.[0];
                   return (
-                    <div key={`${t.id}-${i}`} className="track-row" style={{ fontSize: 14 }}>
+                    <div key={`${t.id || i}-${i}`} className="track-row" style={{ fontSize: 14 }}>
                       <span style={{ color: 'var(--muted)', fontSize: 12, textAlign: 'center' }}>{i + 1}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                        <img src={t.album.images?.[2]?.url || t.album.images?.[0]?.url} alt="" style={{ width: 40, height: 40, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+                        <img src={t.album?.images?.[2]?.url || t.album?.images?.[0]?.url || ''} alt="" style={{ width: 40, height: 40, borderRadius: 4, objectFit: 'cover', flexShrink: 0, background: 'var(--border2)' }} />
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text)' }}>{t.name}</div>
+                          <div style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text)' }}>{t.name || 'Bilinmeyen Şarkı'}</div>
                           <div style={{ color: 'var(--muted2)', fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
-                            {t.artists.map(a => a.name).join(', ')}
+                            {t.artists ? t.artists.map(a => a.name).join(', ') : 'Bilinmeyen Sanatçı'}
                             {genre && <span style={{ marginLeft: 8, color: 'var(--muted)', fontSize: 10, background: 'var(--border)', padding: '2px 6px', borderRadius: 4, textTransform: 'capitalize' }}>{genre}</span>}
                           </div>
                         </div>
                       </div>
-                      <div className="track-col-album" style={{ color: 'var(--muted2)', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.album.name}</div>
+                      <div className="track-col-album" style={{ color: 'var(--muted2)', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.album?.name || ''}</div>
                       <div className="track-col-pop">
                         <div style={{ height: 6, background: 'var(--border2)', borderRadius: 3, overflow: 'hidden' }}>
                           <div style={{ height: '100%', width: `${pop}%`, background: `linear-gradient(90deg, var(--greenDim), var(--green))`, borderRadius: 3 }} />
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, fontWeight: 500 }}>{pop}/100</div>
                       </div>
-                      <span style={{ textAlign: 'right', color: 'var(--muted2)', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{fmt(t.duration_ms)}</span>
+                      <span style={{ textAlign: 'right', color: 'var(--muted2)', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{fmt(t.duration_ms || 0)}</span>
                     </div>
                   );
                 })}
