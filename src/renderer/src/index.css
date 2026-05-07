@@ -1,0 +1,149 @@
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Outfit:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg: #07070f;
+  --card: #0e0e1c;
+  --border: #1c1c30;
+  --border2: #252540;
+  --green: #1DB954;
+  --greenDim: #158a3e;
+  --orange: #ff6b35;
+  --text: #eeeef5;
+  --muted: #5a5a7a;
+  --muted2: #8888aa;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Outfit', sans-serif;
+  min-height: 100vh;
+  overflow-y: overlay;
+  user-select: none; /* Desktop app feel */
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border2);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+.syne {
+  font-family: 'Syne', sans-serif;
+}
+
+input {
+  background: var(--card);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 14px;
+  width: 100%;
+  outline: none;
+  transition: border .2s;
+}
+
+input:focus {
+  border-color: var(--green);
+}
+
+button {
+  cursor: pointer;
+  font-family: 'Outfit', sans-serif;
+}
+
+.btn-green {
+  background: var(--green);
+  color: #000;
+  border: none;
+  padding: 11px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all .2s;
+}
+
+.btn-green:hover:not(:disabled) {
+  background: #23e066;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(29, 185, 84, 0.3);
+}
+
+.btn-green:disabled {
+  background: #1a4a2a;
+  color: #2a6a3a;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--muted2);
+  border: 1px solid var(--border2);
+  padding: 9px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  transition: all .2s;
+}
+
+.btn-ghost:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.fade-in {
+  animation: fadeIn .4s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.track-row {
+  display: grid;
+  grid-template-columns: 32px 1fr 160px 100px 80px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: background .15s;
+}
+
+.track-row:hover {
+  background: var(--border);
+}
+
+@media(max-width: 800px) {
+  .track-row {
+    grid-template-columns: 28px 1fr 80px;
+  }
+  .track-col-album, .track-col-pop {
+    display: none;
+  }
+}

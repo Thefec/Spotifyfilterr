@@ -1,0 +1,6 @@
+@echo off
+title Spotify Playlist Organizer Baslatiliyor...
+cd /d "%~dp0"
+echo Uygulama baslatiliyor, lutfen bekleyin...
+cmd /c npm run dev
+pause
