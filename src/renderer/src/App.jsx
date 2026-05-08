@@ -184,7 +184,7 @@ function PlaylistsScreen({ token, user, playlists, loading, onSelect, onLogout }
 }
 
 // ── Tracks Screen ─────────────────────────────────────────────────────────────
-function TracksScreen({ token, playlist, onBack }) {
+function TracksScreen({ token, playlist, user, onBack }) {
   const [tracks, setTracks] = useState([]);
   const [sortedTracks, setSortedTracks] = useState([]);
   const [sortBy, setSortBy] = useState('artist');
@@ -269,19 +269,46 @@ function TracksScreen({ token, playlist, onBack }) {
     setSortedTracks(sorted);
   }, [sortBy, sortDir, tracks]);
 
+  const isOwner = user && playlist.owner && user.id === playlist.owner.id;
+
   async function applyChanges() {
     setApplying(true);
     setSuccess(false);
     try {
       const uris = sortedTracks.map(i => i.track?.uri).filter(Boolean);
-      await spotifyFetch(`https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, token, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uris: uris.slice(0, 100) })
-      });
-      for (let i = 100; i < uris.length; i += 100) {
-        await spotifyFetch(`https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, token, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uris: uris.slice(i, i + 100) })
+
+      let targetPlaylistId = playlist.id;
+
+      if (!isOwner) {
+        // Eğer liste kullanıcının değilse yeni bir liste oluştur
+        const newPlaylist = await spotifyFetch(`https://api.spotify.com/v1/users/${user.id}/playlists`, token, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: `Düzenlenmiş: ${playlist.name}`,
+            description: 'Playlist Organizer ile oluşturuldu.'
+          })
         });
+        targetPlaylistId = newPlaylist.id;
+
+        // Yeni listeye POST ile şarkıları ekle
+        for (let i = 0; i < uris.length; i += 100) {
+          await spotifyFetch(`https://api.spotify.com/v1/playlists/${targetPlaylistId}/tracks`, token, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uris: uris.slice(i, i + 100) })
+          });
+        }
+      } else {
+        // Liste kullanıcının ise mevcut listeyi güncelle (PUT)
+        await spotifyFetch(`https://api.spotify.com/v1/playlists/${targetPlaylistId}/tracks`, token, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uris: uris.slice(0, 100) })
+        });
+        for (let i = 100; i < uris.length; i += 100) {
+          await spotifyFetch(`https://api.spotify.com/v1/playlists/${targetPlaylistId}/tracks`, token, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uris: uris.slice(i, i + 100) })
+          });
+        }
       }
+
       setSuccess(true);
       setTimeout(() => setSuccess(false), 4000);
     } catch (e) {
@@ -310,7 +337,7 @@ function TracksScreen({ token, playlist, onBack }) {
         </div>
         {success && <div style={{ background: '#0a2e18', border: '1px solid var(--green)', color: 'var(--green)', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600 }}>✓ Spotify'a Kaydedildi!</div>}
         <button className="btn-green" onClick={applyChanges} disabled={applying || loading || !tracks.length} style={{ minWidth: 160 }}>
-          {applying ? <><Spinner size={14} /> Uygulanıyor...</> : '✓ Spotify\'a Uygula'}
+          {applying ? <><Spinner size={14} /> İşleniyor...</> : (isOwner ? '✓ Spotify\'a Uygula' : '+ Yeni Liste Olarak Kaydet')}
         </button>
       </div>
 
@@ -489,7 +516,7 @@ export default function App() {
       )}
       {screen === 'tracks' && selectedPL && (
         <TracksScreen
-          token={token} playlist={selectedPL}
+          token={token} playlist={selectedPL} user={user}
           onBack={() => { setSelectedPL(null); setScreen('playlists'); }}
         />
       )}
