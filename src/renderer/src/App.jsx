@@ -27,24 +27,47 @@ const SORT_OPTIONS = [
 ];
 
 // ── Spotify API wrapper ───────────────────────────────────────────────────────
-async function spotifyFetch(url, token, opts = {}) {
-  const { headers: extraHeaders, ...restOpts } = opts;
-  const r = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}`, ...extraHeaders },
-    ...restOpts
-  });
-  if (!r.ok) {
+async function spotifyFetch(url, token, opts = {}, retries = 3) {
+  const delay = ms => new Promise(res => setTimeout(res, ms));
+  for (let i = 0; i <= retries; i++) {
+    const { headers: extraHeaders, ...restOpts } = opts;
+    const r = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, ...extraHeaders },
+      ...restOpts
+    });
+
+    if (r.ok) {
+      if (r.status === 204) return null;
+      return r.json();
+    }
+
+    if (r.status === 429) {
+      const retryAfter = r.headers.get('Retry-After');
+      const waitMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 2000;
+      console.warn(`[Rate limit hit 429] Waiting for ${waitMs}ms before retry...`);
+      await delay(waitMs);
+      continue; // try again
+    }
+
+    if (r.status >= 500 && i < retries) {
+      console.warn(`[Server error ${r.status}] Retrying (${i + 1}/${retries})...`);
+      await delay(1000 * (i + 1));
+      continue; // try again
+    }
+
     let msg = `API error ${r.status}`;
     try {
       const errData = await r.json();
       if (errData.error && errData.error.message) {
         msg += ` - ${errData.error.message}`;
       }
-    } catch(e) {}
-    throw new Error(msg);
+    } catch (e) {}
+    const error = new Error(msg);
+    error.status = r.status;
+    throw error;
   }
-  if (r.status === 204) return null;
-  return r.json();
+
+  throw new Error("Max retries reached for API request.");
 }
 
 async function fetchAllPages(firstUrl, token) {
@@ -193,6 +216,22 @@ function TracksScreen({ token, playlist, user, onBack }) {
   const [status, setStatus] = useState('Şarkılar yükleniyor...');
   const [applying, setApplying] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(100);
+
+  // Reset visible count when sorting changes
+  useEffect(() => {
+    setVisibleCount(100);
+  }, [sortBy, sortDir]);
+
+  useEffect(() => {
+    function handleScroll() {
+      if (window.innerHeight + document.documentElement.scrollTop >= document.documentElement.offsetHeight - 500) {
+        setVisibleCount(v => Math.min(v + 100, sortedTracks.length));
+      }
+    }
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [sortedTracks.length]);
 
   useEffect(() => {
     (async () => {
@@ -271,47 +310,65 @@ function TracksScreen({ token, playlist, user, onBack }) {
 
   const isOwner = user && playlist.owner && user.id === playlist.owner.id;
 
+  async function createNewPlaylistAndAddTracks(uris) {
+    setStatus('Yeni liste oluşturuluyor...');
+    const newPlaylist = await spotifyFetch(`https://api.spotify.com/v1/users/${user.id}/playlists`, token, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `Düzenlenmiş: ${playlist.name}`,
+        description: 'Playlist Organizer ile oluşturuldu.'
+      })
+    });
+    const targetPlaylistId = newPlaylist.id;
+
+    // Yeni listeye POST ile şarkıları ekle
+    for (let i = 0; i < uris.length; i += 100) {
+      setStatus(`Yeni listeye şarkılar ekleniyor (${Math.min(i + 100, uris.length)} / ${uris.length})...`);
+      await spotifyFetch(`https://api.spotify.com/v1/playlists/${targetPlaylistId}/tracks`, token, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uris: uris.slice(i, i + 100) })
+      });
+    }
+  }
+
   async function applyChanges() {
     setApplying(true);
     setSuccess(false);
+    setStatus('Şarkılar Spotify\'a uygulanıyor...');
     try {
       const uris = sortedTracks.map(i => i.track?.uri).filter(Boolean);
 
-      let targetPlaylistId = playlist.id;
-
       if (!isOwner) {
-        // Eğer liste kullanıcının değilse yeni bir liste oluştur
-        const newPlaylist = await spotifyFetch(`https://api.spotify.com/v1/users/${user.id}/playlists`, token, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: `Düzenlenmiş: ${playlist.name}`,
-            description: 'Playlist Organizer ile oluşturuldu.'
-          })
-        });
-        targetPlaylistId = newPlaylist.id;
-
-        // Yeni listeye POST ile şarkıları ekle
-        for (let i = 0; i < uris.length; i += 100) {
-          await spotifyFetch(`https://api.spotify.com/v1/playlists/${targetPlaylistId}/tracks`, token, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uris: uris.slice(i, i + 100) })
-          });
-        }
+        await createNewPlaylistAndAddTracks(uris);
       } else {
-        // Liste kullanıcının ise mevcut listeyi güncelle (PUT)
-        await spotifyFetch(`https://api.spotify.com/v1/playlists/${targetPlaylistId}/tracks`, token, {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uris: uris.slice(0, 100) })
-        });
-        for (let i = 100; i < uris.length; i += 100) {
-          await spotifyFetch(`https://api.spotify.com/v1/playlists/${targetPlaylistId}/tracks`, token, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uris: uris.slice(i, i + 100) })
+        try {
+          // Liste kullanıcının ise mevcut listeyi güncelle (PUT)
+          setStatus(`Mevcut liste güncelleniyor (100 / ${uris.length})...`);
+          await spotifyFetch(`https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, token, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uris: uris.slice(0, 100) })
           });
+          for (let i = 100; i < uris.length; i += 100) {
+            setStatus(`Mevcut liste güncelleniyor (${Math.min(i + 100, uris.length)} / ${uris.length})...`);
+            await spotifyFetch(`https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, token, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uris: uris.slice(i, i + 100) })
+            });
+          }
+        } catch (updateErr) {
+          if (updateErr.status === 403) {
+            console.warn('403 Forbidden received while updating. Fallback to creating a new playlist...');
+            setStatus('Mevcut liste güncellenemiyor (403). Yeni liste olarak kaydediliyor...');
+            await createNewPlaylistAndAddTracks(uris);
+          } else {
+            throw updateErr;
+          }
         }
       }
 
+      setStatus('');
       setSuccess(true);
       setTimeout(() => setSuccess(false), 4000);
     } catch (e) {
+      setStatus('');
       alert('Hata: ' + e.message);
     }
     setApplying(false);
@@ -336,6 +393,7 @@ function TracksScreen({ token, playlist, user, onBack }) {
           </div>
         </div>
         {success && <div style={{ background: '#0a2e18', border: '1px solid var(--green)', color: 'var(--green)', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600 }}>✓ Spotify'a Kaydedildi!</div>}
+        {applying && status && <div style={{ background: 'var(--border2)', color: 'var(--text)', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 500 }}>{status}</div>}
         <button className="btn-green" onClick={applyChanges} disabled={applying || loading || !tracks.length} style={{ minWidth: 160 }}>
           {applying ? <><Spinner size={14} /> İşleniyor...</> : (isOwner ? '✓ Spotify\'a Uygula' : '+ Yeni Liste Olarak Kaydet')}
         </button>
@@ -392,7 +450,7 @@ function TracksScreen({ token, playlist, user, onBack }) {
                 <span style={{ textAlign: 'right' }}>Süre</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', padding: '8px' }}>
-                {sortedTracks.map((item, i) => {
+                {sortedTracks.slice(0, visibleCount).map((item, i) => {
                   const t = item.track || {};
                   const pop = t.popularity || 0;
                   const genre = item.genres?.[0];
@@ -420,6 +478,11 @@ function TracksScreen({ token, playlist, user, onBack }) {
                     </div>
                   );
                 })}
+                {visibleCount < sortedTracks.length && (
+                  <div style={{ textAlign: 'center', padding: '16px', color: 'var(--muted2)', fontSize: 13 }}>
+                    Aşağı kaydırdıkça daha fazla şarkı yüklenecek... ({visibleCount} / {sortedTracks.length})
+                  </div>
+                )}
               </div>
             </div>
           )}
