@@ -317,7 +317,8 @@ function TracksScreen({ token, playlist, user, onBack }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: `Düzenlenmiş: ${playlist.name}`,
-        description: 'Playlist Organizer ile oluşturuldu.'
+        description: 'Playlist Organizer ile oluşturuldu.',
+        public: false
       })
     });
     const targetPlaylistId = newPlaylist.id;
